@@ -8,7 +8,12 @@ import { randomInt } from "crypto";
 
 function generateAccountNumber(): string {
   const num = randomInt(0, 10_000_000_000);
-  return num.toString().padStart(10, "0");
+    const existing = await db
+      .select()
+      .from(accounts)
+      .where(eq(accounts.accountNumber, num))
+      .get();
+  if (!existing) return num.toString().padStart(10, "0");
 }
 
 // Minimal helper schema for VAL-207 – routingNumber required for bank transfers
