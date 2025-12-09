@@ -4,12 +4,28 @@ import { protectedProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { accounts, transactions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { randomInt } from "crypto";
 
 function generateAccountNumber(): string {
-  return Math.floor(Math.random() * 1000000000)
-    .toString()
-    .padStart(10, "0");
+  const num = randomInt(0, 10_000_000_000);
+  return num.toString().padStart(10, "0");
 }
+
+// Minimal helper schema for VAL-207 – routingNumber required for bank transfers
+const fundingSourceSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("card"),
+    accountNumber: z.string(),
+    routingNumber: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("bank"),
+    accountNumber: z.string(),
+    routingNumber: z
+      .string()
+      .regex(/^\d{9}$/, "Routing number must be 9 digits"),
+  }),
+]);
 
 export const accountRouter = router({
   createAccount: protectedProcedure
@@ -54,17 +70,15 @@ export const accountRouter = router({
       // Fetch the created account
       const account = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber!)).get();
 
-      return (
-        account || {
-          id: 0,
-          userId: ctx.user.id,
-          accountNumber: accountNumber!,
-          accountType: input.accountType,
-          balance: 100,
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        }
-      );
+      // PERF-401 fix: do not fabricate a fallback account with $100 balance
+      if (!account) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create account",
+        });
+      }
+
+      return account;
     }),
 
   getAccounts: protectedProcedure.query(async ({ ctx }) => {
@@ -78,11 +92,8 @@ export const accountRouter = router({
       z.object({
         accountId: z.number(),
         amount: z.number().positive(),
-        fundingSource: z.object({
-          type: z.enum(["card", "bank"]),
-          accountNumber: z.string(),
-          routingNumber: z.string().optional(),
-        }),
+        // VAL-207 fix: use fundingSourceSchema so routingNumber is required for bank transfers
+        fundingSource: fundingSourceSchema,
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -165,7 +176,8 @@ export const accountRouter = router({
       const accountTransactions = await db
         .select()
         .from(transactions)
-        .where(eq(transactions.accountId, input.accountId));
+        .where(eq(transactions.accountId, input.accountId))
+        .orderBy(desc(transactions.createdAt), desc(transactions.id));
 
       const enrichedTransactions = [];
       for (const transaction of accountTransactions) {

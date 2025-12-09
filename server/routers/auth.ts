@@ -5,13 +5,21 @@ import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
+import { hashSSN } from "@/lib/security/ssn";
 import { eq } from "drizzle-orm";
 
 export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
-        email: z.string().email().toLowerCase(),
+        email: z
+          .string()
+          .trim()
+          .email("Invalid email address")
+          .toLowerCase()
+          .refine((value) => !value.endsWith(".con"), {
+            message: "Email domain looks incorrect ('.con'); please check your address.",
+          }),
         password: z.string().min(8),
         firstName: z.string().min(1),
         lastName: z.string().min(1),
@@ -34,10 +42,14 @@ export const authRouter = router({
         });
       }
 
-      const hashedPassword = await bcrypt.hash(input.password, 10);
+      const { ssn, password, ...rest } = input;
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedSsn = hashSSN(ssn);
 
       await db.insert(users).values({
-        ...input,
+        ...rest,
+        ssn: hashedSsn,
         password: hashedPassword,
       });
 
@@ -72,7 +84,9 @@ export const authRouter = router({
         (ctx.res as Headers).set("Set-Cookie", `session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
       }
 
-      return { user: { ...user, password: undefined }, token };
+      const { password: _pw, ssn: _ssn, ...safeUser } = user;
+
+      return { user: safeUser, token };
     }),
 
   login: publicProcedure
@@ -120,7 +134,9 @@ export const authRouter = router({
         (ctx.res as Headers).set("Set-Cookie", `session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
       }
 
-      return { user: { ...user, password: undefined }, token };
+      const { password: _pw, ssn: _ssn, ...safeUser } = user;
+
+      return { user: safeUser, token };
     }),
 
   logout: publicProcedure.mutation(async ({ ctx }) => {

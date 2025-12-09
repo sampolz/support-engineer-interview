@@ -54,14 +54,23 @@ export async function createContext(opts: CreateNextContextOptions | FetchCreate
 
       const session = await db.select().from(sessions).where(eq(sessions.token, token)).get();
 
-      if (session && new Date(session.expiresAt) > new Date()) {
-        user = await db.select().from(users).where(eq(users.id, decoded.userId)).get();
-        const expiresIn = new Date(session.expiresAt).getTime() - new Date().getTime();
-        if (expiresIn < 60000) {
-          console.warn("Session about to expire");
+            const session = await db.select().from(sessions).where(eq(sessions.token, token)).get();
+
+      if (session) {
+        const now = Date.now();
+        const expiresAtMs = new Date(session.expiresAt).getTime();
+        const expiresIn = expiresAtMs - now;
+        const SAFETY_WINDOW_MS = 60_000; // 60 seconds
+
+        if (expiresIn > SAFETY_WINDOW_MS) {
+          user = await db.select().from(users).where(eq(users.id, decoded.userId)).get();
+        } else {
+          console.warn(
+            `Session expired or within safety window (expiresIn=${expiresIn}ms). Treating as invalid.`
+          );
         }
       }
-    } catch (error) {
+    catch (error) {
       // Invalid token
     }
   }

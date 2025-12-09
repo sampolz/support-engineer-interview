@@ -17,6 +17,32 @@ type FundingFormData = {
   routingNumber?: string;
 };
 
+const luhnCheck = (num: string): boolean => {
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let i = num.length - 1; i >= 0; i--) {
+    let digit = parseInt(num[i], 10);
+
+    if (Number.isNaN(digit)) {
+      return false;
+    }
+
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+};
+
+
 export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProps) {
   const [error, setError] = useState("");
   const {
@@ -71,17 +97,15 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
                 {...register("amount", {
                   required: "Amount is required",
                   pattern: {
-                    value: /^\d+\.?\d{0,2}$/,
+                    value: /^(?:0|[1-9]\d*)(?:\.\d{0,2})?$/,
                     message: "Invalid amount format",
                   },
-                  min: {
-                    value: 0.0,
-                    message: "Amount must be at least $0.01",
-                  },
-                  max: {
-                    value: 10000,
-                    message: "Amount cannot exceed $10,000",
-                  },
+                  validate: {
+                    positive: (value) =>
+                      parseFloat(value) > 0 || "Amount must be greater than $0.00",
+                    max: (value) =>
+                      parseFloat(value) <= 10000 || "Amount cannot exceed $10,000",
+                  }
                 })}
                 type="text"
                 className="pl-7 block w-full rounded-md border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm p-2 border"
@@ -112,14 +136,23 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
             <input
               {...register("accountNumber", {
                 required: `${fundingType === "card" ? "Card" : "Account"} number is required`,
-                pattern: {
-                  value: fundingType === "card" ? /^\d{16}$/ : /^\d+$/,
-                  message: fundingType === "card" ? "Card number must be 16 digits" : "Invalid account number",
-                },
+                pattern:
+                  fundingType === "card"
+                    ? undefined
+                    : {
+                        value: /^\d+$/,
+                        message: "Invalid account number",
+                      },
                 validate: {
                   validCard: (value) => {
                     if (fundingType !== "card") return true;
-                    return value.startsWith("4") || value.startsWith("5") || "Invalid card number";
+                    const digits = value.replace(/[\s-]/g, "");
+
+                    if (!/^\d{13,19}$/.test(digits)) {
+                      return "Card number must be between 13 and 19 digits";
+                    }
+
+                    return luhnCheck(digits) || "Invalid card number";
                   },
                 },
               })}
@@ -127,7 +160,9 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
               placeholder={fundingType === "card" ? "1234567812345678" : "123456789"}
             />
-            {errors.accountNumber && <p className="mt-1 text-sm text-red-600">{errors.accountNumber.message}</p>}
+            {errors.accountNumber && (
+              <p className="mt-1 text-sm text-red-600">{errors.accountNumber.message}</p>
+            )}
           </div>
 
           {fundingType === "bank" && (

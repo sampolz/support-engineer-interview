@@ -21,6 +21,15 @@ type SignupFormData = {
   zipCode: string;
 };
 
+const US_STATE_CODES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
+];
+
+
 export default function SignupPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -83,8 +92,22 @@ export default function SignupPage() {
                   {...register("email", {
                     required: "Email is required",
                     pattern: {
-                      value: /^\S+@\S+$/i,
+                      // Simple but stricter than /^\S+@\S+$/i
+                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
                       message: "Invalid email address",
+                    },
+                    setValueAs: (value) => value.trim(),
+                    validate: {
+                      commonTypos: (value) => {
+                        const lower = value.toLowerCase();
+
+                        // Catch very common typo: ".con" instead of ".com"
+                        if (lower.endsWith(".con")) {
+                          return "Email domain looks incorrect ('.con'); did you mean '.com'?";
+                        }
+
+                        return true;
+                      },
                     },
                   })}
                   type="email"
@@ -110,12 +133,20 @@ export default function SignupPage() {
                         return !commonPasswords.includes(value.toLowerCase()) || "Password is too common";
                       },
                       hasNumber: (value) => /\d/.test(value) || "Password must contain a number",
+                      hasUppercase: (value) =>
+                        /[A-Z]/.test(value) || "Password must contain an uppercase letter",
+                      hasLowercase: (value) =>
+                        /[a-z]/.test(value) || "Password must contain a lowercase letter",
+                      hasSpecial: (value) =>
+                        /[^A-Za-z0-9]/.test(value) || "Password must contain a special character",
                     },
                   })}
                   type="password"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
-                {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>}
+                {errors.password && (
+                  <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                )}
               </div>
 
               <div>
@@ -172,28 +203,68 @@ export default function SignupPage() {
                 <input
                   {...register("phoneNumber", {
                     required: "Phone number is required",
+                    setValueAs: (value) => value.replace(/\s+/g, "").trim(),
                     pattern: {
-                      value: /^\d{10}$/,
-                      message: "Phone number must be 10 digits",
+                      // International format: optional "+" and 10–15 digits
+                      value: /^\+?\d{10,15}$/,
+                      message: "Enter a valid international phone number (10–15 digits, optional +)",
                     },
                   })}
                   type="tel"
-                  placeholder="1234567890"
+                  placeholder="+14155552671"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
-                {errors.phoneNumber && <p className="mt-1 text-sm text-red-600">{errors.phoneNumber.message}</p>}
+                {errors.phoneNumber && (
+                  <p className="mt-1 text-sm text-red-600">{errors.phoneNumber.message}</p>
+                )}
               </div>
 
               <div>
                 <label htmlFor="dateOfBirth" className="block text-sm font-medium text-gray-700">
                   Date of Birth
                 </label>
+
                 <input
-                  {...register("dateOfBirth", { required: "Date of birth is required" })}
+                  {...register("dateOfBirth", {
+                    required: "Date of birth is required",
+                    validate: {
+                      validDate: (value) => {
+                        const dob = new Date(value);
+                        return !isNaN(dob.getTime()) || "Please enter a valid date";
+                      },
+                      notInFuture: (value) => {
+                        const dob = new Date(value);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        dob.setHours(0, 0, 0, 0);
+                        return dob <= today || "Date of birth cannot be in the future";
+                      },
+                      isAdult: (value) => {
+                        const dob = new Date(value);
+                        const today = new Date();
+
+                        let age = today.getFullYear() - dob.getFullYear();
+                        const monthDiff = today.getMonth() - dob.getMonth();
+
+                        if (
+                          monthDiff < 0 ||
+                          (monthDiff === 0 && today.getDate() < dob.getDate())
+                        ) {
+                          age--;
+                        }
+
+                        return age >= 18 || "You must be at least 18 years old";
+                      },
+                    },
+                  })}
+                  id="dateOfBirth"
                   type="date"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
-                {errors.dateOfBirth && <p className="mt-1 text-sm text-red-600">{errors.dateOfBirth.message}</p>}
+
+                {errors.dateOfBirth && (
+                  <p className="mt-1 text-sm text-red-600">{errors.dateOfBirth.message}</p>
+                )}
               </div>
             </div>
           )}
@@ -251,10 +322,8 @@ export default function SignupPage() {
                   <input
                     {...register("state", {
                       required: "State is required",
-                      pattern: {
-                        value: /^[A-Z]{2}$/,
-                        message: "Use 2-letter state code",
-                      },
+                      validate: (value) =>
+                        US_STATE_CODES.includes(value.toUpperCase()) || "Invalid U.S. state code",
                     })}
                     type="text"
                     placeholder="CA"
